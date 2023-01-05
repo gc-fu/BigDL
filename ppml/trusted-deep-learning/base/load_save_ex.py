@@ -17,10 +17,13 @@
 from torch.utils.data import DataLoader
 import torch
 import torch.optim as optim
+from contextlib import nullcontext
 import torch.nn.functional as F
 import os
 import torch.nn as nn
+import time
 from bigdl.nano.pytorch.patching import patch_encryption
+import logging
 from bigdl.ppml.kms.client import generate_primary_key, generate_data_key, get_data_key_plaintext
 from datasets.load import load_from_disk
 import argparse
@@ -119,11 +122,61 @@ def collate_fn(batch_samples):
     y = torch.tensor(batch_label)
     return X, y
 
+class NeuralNetwork(nn.Module):
+    def __init__(self):
+        super(NeuralNetwork, self).__init__()
+        if args.local_only:
+            self.bert_encoder = BertModel.from_pretrained(
+                checkpoint, local_files_only=True)
+        else:
+            self.bert_encoder = BertModel.from_pretrained(checkpoint)
+        self.classifier = nn.Linear(768, 2)
 
+    def forward(self, x):
+        bert_output = self.bert_encoder(**x)
+        cls_vectors = bert_output.last_hidden_state[:, 0]
+        logits = self.classifier(cls_vectors)
+        return logits
+
+
+device = 'cpu'
+
+def train_loop(dataloader, model, loss_fn, optimizer, epoch, total_loss):
+    # Set to train mode
+    model.train()
+    total_dataset = 0
+    optimizer.zero_grad(set_to_none=True)
+    enumerator = enumerate(dataloader, start=1)
+    for batch, (X, y) in enumerator:
+        my_context = nullcontext
+        with my_context():
+            X, y = X.to(device), y.to(device)
+        # Forward pass
+            pred = model(X)
+            loss = loss_fn(pred, y)
+            loss.backward()
+            total_loss += loss.item()
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+
+        total_dataset += 16
+        if batch % 20 == 0:
+            msg = "Train Epoch: {} [{}/{} ({:.0f}%)]\tloss={:.4f}".format(
+                epoch, batch, len(dataloader),
+                100. * batch / len(dataloader), loss.item())
+            logging.info(msg)
+
+    return total_loss, total_dataset
 
 
 
 def main():
+
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)-8s %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%SZ",
+        level=logging.DEBUG)
+
     prepare_env()
     # This is only safe in sgx environment, where the memory can not be read
     secret_key = get_key()
@@ -141,6 +194,25 @@ def main():
     train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, collate_fn=collate_fn)
     print("[INFO]Data get loaded successfully", flush=True)
 
+    model = NeuralNetwork().to(device)
+    loss_fn = nn.CrossEntropyLoss()
+    optimizer = AdamW(model.parameters(), lr=args.lr)
+    total_loss = 0.
+
+
+    for t in range(1):
+        print(f"Epoch {t+1}/{args.epochs + 1}\n-------------------------------")
+        start = time.perf_counter()
+        total_loss, total_dataset = train_loop(
+            train_dataloader, model, loss_fn, optimizer, t+1, total_loss)
+        end = time.perf_counter()
+        print(f"Epoch {t+1}/{args.epochs + 1} Elapsed time:",
+              end - start, flush=True)
+        print(f"Epoch {t+1}/{args.epochs + 1} Processed dataset length:",
+              total_dataset, flush=True)
+        msg = "Epoch {}/{} Throughput: {: .4f}".format(
+            t+1, args.epochs+1, 1.0 * total_dataset / (end-start))
+        print(msg, flush=True)
 
 if __name__ == "__main__":
     main()
