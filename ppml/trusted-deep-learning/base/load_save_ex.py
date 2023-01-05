@@ -196,22 +196,19 @@ def main():
 
     model = NeuralNetwork().to(device)
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = AdamW(model.parameters(), lr=args.lr)
+    optimizer = AdamW(model.parameters(), 0.01)
     total_loss = 0.
 
 
     for t in range(1):
-        print(f"Epoch {t+1}/{args.epochs + 1}\n-------------------------------")
+        print(f"training begin\n-------------------------------")
         start = time.perf_counter()
         total_loss, total_dataset = train_loop(
             train_dataloader, model, loss_fn, optimizer, t+1, total_loss)
         end = time.perf_counter()
-        print(f"Epoch {t+1}/{args.epochs + 1} Elapsed time:",
-              end - start, flush=True)
-        print(f"Epoch {t+1}/{args.epochs + 1} Processed dataset length:",
-              total_dataset, flush=True)
-        msg = "Epoch {}/{} Throughput: {: .4f}".format(
-            t+1, args.epochs+1, 1.0 * total_dataset / (end-start))
+        print(f"Elapsed time:", end - start, flush=True)
+        print(f"Processed dataset length:", total_dataset, flush=True)
+        msg = "Throughput: {: .4f}".format(1.0 * total_dataset / (end-start))
         print(msg, flush=True)
 
 if __name__ == "__main__":
