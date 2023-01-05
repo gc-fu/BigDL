@@ -36,17 +36,6 @@ parser.add_argument("--dataset-path", type=str, default="/ppml/dataset",
 
 args = parser.parse_args()
 
-# class linearModel(nn.Module):
-#     def __init__(self):
-#         super(linearModel, self).__init__()
-#         self.linear = nn.Linear(1, 1)
-#         # Let's fill in the weight by ourselves so that we can later change it.
-#         self.linear.weight.data.fill_(1.245)
-
-#     def forward(self, x):
-#         out = self.linear(x)
-#         return out
-
 
 # Define APPID and APIKEY in os.environment
 APPID = os.environ.get('APPID')
@@ -58,6 +47,14 @@ encrypted_data_key_path = ""
 
 EHSM_IP = os.environ.get('ehsm_ip')
 EHSM_PORT = os.environ.get('ehsm_port', "9000")
+
+if args.local_only:
+    checkpoint = args.model_path
+    tokenizer = BertTokenizer.from_pretrained(
+        checkpoint, model_max_length=512, local_files_only=True)
+else:
+    checkpoint = 'hfl/chinese-pert-base'
+    tokenizer = BertTokenizer.from_pretrained(checkpoint, model_max_length=512)
 
 # prepare environment
 def prepare_env():
