@@ -14,24 +14,38 @@
 # limitations under the License.
 #
 
+from torch.utils.data import DataLoader
+import torch
 import torch.optim as optim
 import torch.nn.functional as F
 import os
 import torch.nn as nn
-from bigdl.ppml.encryption.torch.models import save, load
+from bigdl.nano.pytorch.patching import patch_encryption
 from bigdl.ppml.kms.client import generate_primary_key, generate_data_key, get_data_key_plaintext
+from datasets.load import load_from_disk
+import argparse
+from transformers import BertTokenizer, BertModel, AdamW
 
+parser = argparse.ArgumentParser(description="PyTorch PERT Example")
+parser.add_argument("--local-only", action="store_true", default=False,
+                    help="If set to true, then load model from disk")
+parser.add_argument("--model-path", type=str, default="/ppml/model",
+                    help="Where to load model")
+parser.add_argument("--dataset-path", type=str, default="/ppml/dataset",
+                    help="Where to load original dataset")
 
-class linearModel(nn.Module):
-    def __init__(self):
-        super(linearModel, self).__init__()
-        self.linear = nn.Linear(1, 1)
-        # Let's fill in the weight by ourselves so that we can later change it.
-        self.linear.weight.data.fill_(1.245)
+args = parser.parse_args()
 
-    def forward(self, x):
-        out = self.linear(x)
-        return out
+# class linearModel(nn.Module):
+#     def __init__(self):
+#         super(linearModel, self).__init__()
+#         self.linear = nn.Linear(1, 1)
+#         # Let's fill in the weight by ourselves so that we can later change it.
+#         self.linear.weight.data.fill_(1.245)
+
+#     def forward(self, x):
+#         out = self.linear(x)
+#         return out
 
 
 # Define APPID and APIKEY in os.environment
@@ -56,22 +70,72 @@ def prepare_env():
     generate_data_key(EHSM_IP, EHSM_PORT, encrypted_primary_key_path, 32)
     global encrypted_data_key_path
     encrypted_data_key_path = "./encrypted_data_key"
+    patch_encryption()
 
 # Get a key from kms that can be used for encryption/decryption
 def get_key():
     return get_data_key_plaintext(EHSM_IP, EHSM_PORT, encrypted_primary_key_path, encrypted_data_key_path)
 
+def save_encrypted_dataset(dataset_path, save_path, secret_key):
+    dataset = load_from_disk(dataset_path, keep_in_memory=True)
+    # This will save the encrypted dataset into disk
+    torch.save(dataset, save_path, encryption_key = secret_key)
+
+class Dataset(torch.utils.data.Dataset):
+    # data_type is actually split, so that we can define dataset for train set/validate set
+    def __init__(self, data_path, key):
+        self.data = self.load_data(data_path, key)
+
+    def load_data(self, data_path, key):
+        #tmp_dataset = load_dataset(path='seamew/ChnSentiCorp', split=data_type)
+        tmp_dataset = torch.load(data_path, decryption_key = key)
+        Data = {}
+        # So enumerate will return a index, and  the line?
+        # line is a dict, including 'text', 'label'
+        for idx, line in enumerate(tmp_dataset):
+            sample = line
+            Data[idx] = sample
+
+        return Data
+
+def collate_fn(batch_samples):
+    batch_text = []
+    batch_label = []
+    for sample in batch_samples:
+        batch_text.append(sample['text'])
+        batch_label.append(int(sample['label']))
+    # The tokenizer will make the data to be a good format for our model to understand
+    X = tokenizer(
+        batch_text,
+        padding=True,
+        truncation=True,
+        return_tensors="pt"
+    )
+    y = torch.tensor(batch_label)
+    return X, y
+
+
+
+
+
 def main():
     prepare_env()
     # This is only safe in sgx environment, where the memory can not be read
     secret_key = get_key()
-    # Try to save a model
-    model = linearModel()
-    save(model.state_dict(), "testsave.pt", secret_key)
-    model.linear.weight.data.fill_(1.110)
-    model.load_state_dict(load("testsave.pt", secret_key))
-    # Should print 1.245
-    print(model.linear.weight.data[0], flush=True)
+
+    encrypted_dataset_path = "/ppml/encryption_dataset.pt"
+
+    # Assume we are in customer environment (which is safe and trusted)
+    save_encrypted_dataset(args.dataset_path, encrypted_dataset_path, secret_key)
+
+    # Now we have the encrypted dataset, we can safely distribute it into
+    # untrusted environments.
+
+    # load the encrypted dataset back and ready for training 
+    train_dataset = Dataset(encrypted_dataset_path, secret_key)
+    train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, collate_fn=collate_fn)
+    print("[INFO]Data get loaded successfully", flush=True)
+
 
 if __name__ == "__main__":
     main()
