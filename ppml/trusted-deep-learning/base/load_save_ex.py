@@ -34,6 +34,8 @@ parser.add_argument("--model-path", type=str, default="/ppml/model",
 parser.add_argument("--dataset-path", type=str, default="/ppml/dataset",
                     help="Where to load original dataset")
 
+
+# python3 load_save_ex.py --local-only --model-path /ppml/model --dataset-path /ppml/save-datasets/train/
 args = parser.parse_args()
 
 
@@ -94,6 +96,12 @@ class Dataset(torch.utils.data.Dataset):
             Data[idx] = sample
 
         return Data
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return self.data[idx]
 
 def collate_fn(batch_samples):
     batch_text = []
