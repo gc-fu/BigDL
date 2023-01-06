@@ -201,7 +201,7 @@ def main():
     print(f"training begin\n-------------------------------")
     start = time.perf_counter()
     total_loss, total_dataset = train_loop(
-        train_dataloader, model, loss_fn, optimizer, t+1, total_loss)
+        train_dataloader, model, loss_fn, optimizer, 1, total_loss)
     end = time.perf_counter()
     print(f"Elapsed time:", end - start, flush=True)
     print(f"Processed dataset length:", total_dataset, flush=True)
