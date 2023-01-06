@@ -63,6 +63,10 @@ else:
 
 # prepare environment
 def prepare_env():
+    """
+    |1. Check whether arguments required by KMS is set.
+    |2. Apply patch to torch.
+    """
     if APPID is None or APIKEY is None or EHSM_IP is None:
         print("Please set environment variable APPID, APIKEY, ehsm_ip!")
         exit(1)
@@ -84,16 +88,13 @@ def save_encrypted_dataset(dataset_path, save_path, secret_key):
     torch.save(dataset, save_path, encryption_key = secret_key)
 
 class Dataset(torch.utils.data.Dataset):
-    # data_type is actually split, so that we can define dataset for train set/validate set
     def __init__(self, data_path, key):
         self.data = self.load_data(data_path, key)
 
     def load_data(self, data_path, key):
-        #tmp_dataset = load_dataset(path='seamew/ChnSentiCorp', split=data_type)
+        # Passing the same key here
         tmp_dataset = torch.load(data_path, decryption_key = key)
         Data = {}
-        # So enumerate will return a index, and  the line?
-        # line is a dict, including 'text', 'label'
         for idx, line in enumerate(tmp_dataset):
             sample = line
             Data[idx] = sample
@@ -112,7 +113,7 @@ def collate_fn(batch_samples):
     for sample in batch_samples:
         batch_text.append(sample['text'])
         batch_label.append(int(sample['label']))
-    # The tokenizer will make the data to be a good format for our model to understand
+    # The tokenizer will make the data to be in good format for our model to understand
     X = tokenizer(
         batch_text,
         padding=True,
@@ -148,16 +149,14 @@ def train_loop(dataloader, model, loss_fn, optimizer, epoch, total_loss):
     optimizer.zero_grad(set_to_none=True)
     enumerator = enumerate(dataloader, start=1)
     for batch, (X, y) in enumerator:
-        my_context = nullcontext
-        with my_context():
-            X, y = X.to(device), y.to(device)
-        # Forward pass
-            pred = model(X)
-            loss = loss_fn(pred, y)
-            loss.backward()
-            total_loss += loss.item()
-            optimizer.step()
-            optimizer.zero_grad(set_to_none=True)
+
+        X, y = X.to(device), y.to(device)
+        pred = model(X)
+        loss = loss_fn(pred, y)
+        loss.backward()
+        total_loss += loss.item()
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
 
         total_dataset += 16
         if batch % 20 == 0:
@@ -171,7 +170,7 @@ def train_loop(dataloader, model, loss_fn, optimizer, epoch, total_loss):
 
 
 def main():
-
+    # Logging setting.
     logging.basicConfig(
         format="%(asctime)s %(levelname)-8s %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%SZ",
@@ -183,7 +182,7 @@ def main():
 
     encrypted_dataset_path = "/ppml/encryption_dataset.pt"
 
-    # Assume we are in customer environment (which is safe and trusted)
+    # Assume we are in customer environment when executing this(which is safe and trusted)
     save_encrypted_dataset(args.dataset_path, encrypted_dataset_path, secret_key)
 
     # Now we have the encrypted dataset, we can safely distribute it into
@@ -199,17 +198,15 @@ def main():
     optimizer = AdamW(model.parameters(), 0.01)
     total_loss = 0.
 
-
-    for t in range(1):
-        print(f"training begin\n-------------------------------")
-        start = time.perf_counter()
-        total_loss, total_dataset = train_loop(
-            train_dataloader, model, loss_fn, optimizer, t+1, total_loss)
-        end = time.perf_counter()
-        print(f"Elapsed time:", end - start, flush=True)
-        print(f"Processed dataset length:", total_dataset, flush=True)
-        msg = "Throughput: {: .4f}".format(1.0 * total_dataset / (end-start))
-        print(msg, flush=True)
+    print(f"training begin\n-------------------------------")
+    start = time.perf_counter()
+    total_loss, total_dataset = train_loop(
+        train_dataloader, model, loss_fn, optimizer, t+1, total_loss)
+    end = time.perf_counter()
+    print(f"Elapsed time:", end - start, flush=True)
+    print(f"Processed dataset length:", total_dataset, flush=True)
+    msg = "Throughput: {: .4f}".format(1.0 * total_dataset / (end-start))
+    print(msg, flush=True)
 
 if __name__ == "__main__":
     main()
