@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bigdl-fschat-controller
+  labels:
+    fastchat-appid: a1234bd
+    fastchat-app-type: controller
+spec:
+  hostNetwork: True
+  dnsPolicy: "ClusterFirst"
+  containers:
+  - name: fastchat-controller # fixed
+    image: "10.239.45.10/arda/intelanalytics/bigdl-ppml-trusted-fastchat-tdx:2.4.0-SNAPSHOT"
+    imagePullPolicy: Always
+    env:
+    - name: CONTROLLER_ADDRESS # fixed
+      value: bigdl-a1234bd-fschat-controller-service
+    - name: CONTROLLER_PORT # fixed
+      value: "21002"
+    - name: API_HOST # fixed
+      value: bigdl-a1234bd-fschat-controller-service
+    - name: APP_PORT        # fixed
+      value: "8000"
+    volumeMounts:
+      - name: ppml-models
+        mountPath: /ppml/models/
+    resources:
+      requests:
+        memory: 32Gi
+        cpu: 8
+      limits:
+        memory: 32Gi
+        cpu: 8
+    args: ["-c -z 10.112.242.181 -p 21005 -o 10.112.242.181 -u 8000"]
+  restartPolicy: "Never"
+  volumes:
+  - name: ppml-models
+    hostPath:
+      path: /root/.cache/weights/
+
+
+
+---
+# Service for the controller
+apiVersion: v1
+kind: Service
+metadata:
+  name: bigdl-a1234bd-fschat-controller-service
+spec:
+  selector:
+    fastchat-appid: a1234bd
+    fastchat-app-type: controller
+
+  ports:
+    - protocol: TCP
+      port: 29500
+      targetPort: 29500
