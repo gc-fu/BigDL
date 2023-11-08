@@ -92,7 +92,7 @@ class Worker:
             del self.kv_cache[seq_id]
 
     def init_model(self):
-        if self.model_config.device != 'cpu':
+        if self.model_config.device == 'gpu':
             # This env var set by Ray causes exceptions with graph building.
             os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
             # Env vars will be set by Ray.
