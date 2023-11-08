@@ -109,7 +109,7 @@ class BigDLLlamaForCausalLM(nn.Module):
             )
             self.model = optimize_model(model)
             self.sampler = BigDLSampler(config.vocab_size, device)
-        else if device == 'xpu':
+        elif device == 'xpu':
             try:
                 import intel_extension_for_pytorch as ipex
             except ImportError:
