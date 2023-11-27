@@ -34,6 +34,9 @@
 # https://github.com/lm-sys/FastChat/blob/168ccc29d3f7edc50823016105c024fe2282732a/fastchat/serve/openai_api_server.py
 # Adapted from
 # https://github.com/lm-sys/FastChat/blob/168ccc29d3f7edc50823016105c024fe2282732a/fastchat/protocol/openai_api_protocol.py
+#
+# bigdl-llm Intel specified code change
+#
 
 import time
 from typing import Dict, List, Literal, Optional, Union
@@ -41,6 +44,9 @@ from typing import Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field
 
 from bigdl.llm.vllm.utils import random_uuid
+
+# bigdl-llm change start
+# summary: add token time recording logic
 
 
 class ErrorResponse(BaseModel):
@@ -211,6 +217,8 @@ class ChatCompletionResponseStreamChoice(BaseModel):
     finish_reason: Optional[Literal["stop", "length"]] = None
     first_token_time: Optional[float] = None
     rest_token_time: Optional[float] = None
+
+# bigdl-llm change end
 
 
 class ChatCompletionStreamResponse(BaseModel):
