@@ -42,6 +42,14 @@ def _pad_to_max(x: List[int], max_len: int, padding_id: int = 0) -> List[int]:
     return x + [padding_id] * (max_len - len(x))
 
 
+def _padding_prompt_to_max(input_ids: List[List[int]], max_prompt_len: int, padding_id: int = 0) -> List[List[int]]:
+    return [prompt + [padding_id] * (max_prompt_len - len(prompt)) for prompt in input_ids]
+
+
+def _get_attention_mask_for_prompts(input_ids: List[List[int]], max_prompt_len: int) -> List[List[int]]:
+    attention_mask = [[1] * len(prompt) + [0] * (max_prompt_len- len(prompt)) for prompt in input_ids]
+    return attention_mask
+
 class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
 
     def __init__(
@@ -105,6 +113,7 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
         kv_cache_size_1 = 2
         seq_len = len(seq_group_meta_data_lists)
 
+        # input_ids that will be passed to underlying models
         bigdl_input_ids = []
         bigdl_position_ids = []
         bigdl_attention_mask = []
@@ -194,3 +203,80 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
         # tmp = torch.xpu.memory_stats()
         # logger.info(f"after: {tmp['allocated_bytes.all.current']}")
         return bigdl_output
+
+
+
+    def forward_new(
+        self,
+        seq_group_meta_data_lists: List[SequenceGroupMetadata],
+        kv_cache: Optional = None,
+        input_metadata: Optional = None,
+    ) -> Tuple[torch.Tensor, List[Tuple[torch.Tensor, torch.Tensor]]]:
+
+        # We should arrange inputs that will be passed to the bigdl-llm models
+        # Specifically, we should arrange input_ids, position_ids, attention_mask
+        # So, here it is:
+        bigdl_input_ids = []
+        bigdl_position_ids = []
+        # TODO(gc): consider delete this?
+        bigdl_attention_mask = []
+
+        # 0. Verify is_prompt or is_decoding
+        is_prefill_stage = seq_group_meta_data_lists[0].is_prompt
+
+        # 1. Assemble bigdl_input_ids
+        for seq_group_meta_data in seq_group_meta_data_lists:
+            # seq_group contains multiple sequences, we only process the first unfinished one
+            processed_seq_id = seq_group_meta_data.seq_data.keys()[0]
+            processed_seq_data = seq_group_meta_data.seq_data[processed_seq_id]
+            # We need to process differently for prefill/decoding
+            if is_prefill_stage:
+                # For prefill, all tokens are needed
+                bigdl_input_ids.append(processed_seq_data.get_token_ids())
+            else:
+                # For decoding, only the last token is needed
+                bigdl_input_ids.append(processed_seq_data.get_last_token_id())
+
+        # For prompt we need to do padding so that they have the same length
+        # TODO(gc): implement selective_batching for prefill
+        if is_prefill_stage:
+            # padding bigdl_input_ids to max_prompt_len
+            max_prompt_len = len(max(bigdl_input_ids, key=len))
+            # attention_mask need to be calculated before padding
+            bigdl_attention_mask = _get_attention_mask_for_prompts(bigdl_input_ids, max_prompt_len)
+            bigdl_input_ids = _padding_prompt_to_max(bigdl_input_ids, max_prompt_len, 0)
+        # 1. Assemble bigdl_input_ids end
+
+        # 2. Assemble kv_cache for decoding stage?
+        # TODO(gc): we may need to set bigdl_attention_mask correctly for decoding stage
+
+        # 2. Assemble kv_cache end
+
+
+        # 3. Invoke underlying models
+        if is_prefill_stage:
+            bigdl_input_ids = torch.tensor(bigdl_input_ids, device=self.device)
+            kwargs = {
+                "input_ids": bigdl_input_ids,
+                "attention_mask": bigdl_attention_mask,
+                "past_key_values": None,
+                "use_cache": True,
+            }
+            outputs = self.model.forward(**kwargs)
+        else:
+            pass
+        # 3. Invoke underlying models end
+
+
+        # 4. Update kv_cache
+
+
+        # 4. Update kv_cache ends
+
+
+        # 5. applying sampler
+
+        # 5. applying sampler ends
+
+        # 6. return result to invoker
+        return
