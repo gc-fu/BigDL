@@ -42,21 +42,30 @@ def _pad_to_max(x: List[int], max_len: int, padding_id: int = 0) -> List[int]:
     return x + [padding_id] * (max_len - len(x))
 
 
-def _padding_prompt_to_max(input_ids: List[List[int]], max_prompt_len: int, padding_id: int = 0) -> List[List[int]]:
-    return [prompt + [padding_id] * (max_prompt_len - len(prompt)) for prompt in input_ids]
+def _padding_prompt_to_max(
+    input_ids: List[List[int]], max_prompt_len: int, padding_id: int = 0
+) -> List[List[int]]:
+    return [
+        prompt + [padding_id] * (max_prompt_len - len(prompt)) for prompt in input_ids
+    ]
 
 
-def _get_attention_mask_for_prompts(input_ids: List[List[int]], max_prompt_len: int) -> List[List[int]]:
-    attention_mask = [[1] * len(prompt) + [0] * (max_prompt_len- len(prompt)) for prompt in input_ids]
+def _get_attention_mask_for_prompts(
+    input_ids: List[List[int]], max_prompt_len: int
+) -> List[List[int]]:
+    attention_mask = [
+        [1] * len(prompt) + [0] * (max_prompt_len - len(prompt)) for prompt in input_ids
+    ]
     return attention_mask
 
-class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
 
+class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
     def __init__(
         self,
         config: LlamaConfig,
         device: Optional[str] = None,
         max_model_len: Optional[int] = None,
+        debug=True,
     ):
         super().__init__(config, device, max_model_len)
         self.config = config
@@ -66,7 +75,7 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
             from bigdl.llm import optimize_model
 
         # low_bit = 'sym_int4'
-        if device == 'cpu':
+        if device == "cpu":
             model = AutoModelForCausalLM.from_pretrained(
                 config._name_or_path,
                 low_cpu_mem_usage=True,
@@ -75,26 +84,27 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
             )
             self.model = optimize_model(model)
             self.sampler = BigDLSampler(config.vocab_size, device)
-        elif device == 'xpu':
+        elif device == "xpu":
             try:
                 import intel_extension_for_pytorch as ipex
             except ImportError:
-                print("Intel Extension for PyTorch is not installed, \
-                       but is required for xpu inference.")
+                print(
+                    "Intel Extension for PyTorch is not installed, \
+                       but is required for xpu inference."
+                )
 
-            low_bit = 'sym_int4'
+            low_bit = "sym_int4"
             model = AutoModelForCausalLM.from_pretrained(
                 config._name_or_path,
                 load_in_low_bit=low_bit,
                 trust_remote_code=True,
                 use_cache=True,
             )
-            self.model = model.to('xpu')
-            self.sampler = BigDLSampler(config.vocab_size, device).to('xpu')
+            self.model = model.to("xpu")
+            self.sampler = BigDLSampler(config.vocab_size, device).to("xpu")
 
         if device is None:
-            self.device = torch.device(
-                "cuda" if torch.cuda.is_available() else "cpu")
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         else:
             self.device = torch.device(device)
         self.dtype = self.model.dtype
@@ -102,8 +112,13 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
         self.tmp_kv_cache = None
         self.pad_token_id = config.pad_token_id
         self.max_seq_limit = max_model_len
+        self.debug = debug
 
-    def forward(
+    def debug_print(self, *args, **kwargs):
+        if self.debug:
+            print(*args, **kwargs)
+
+    def forward_old(
         self,
         seq_group_meta_data_lists: List[SequenceGroupMetadata],
         kv_cache: Optional = None,
@@ -141,8 +156,13 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
             bigdl_sampling_params[seq_id] = seq_group_meta_data.sampling_params
 
         if all_decoding:
-            bigdl_kv_cache = self.prepare_kv_cache(cur_seq_ids, seq_group_meta_data_lists,
-                                                   kv_cache, kv_cache_size_0, kv_cache_size_1)
+            bigdl_kv_cache = self.prepare_kv_cache(
+                cur_seq_ids,
+                seq_group_meta_data_lists,
+                kv_cache,
+                kv_cache_size_0,
+                kv_cache_size_1,
+            )
         else:
             bigdl_input_ids = [
                 _pad_to_max(input_ids, max_context_len, self.pad_token_id)
@@ -163,7 +183,9 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
         bigdl_input_ids = torch.tensor(bigdl_input_ids, device=self.device)
         if all_decoding:
             bigdl_position_ids = torch.tensor(bigdl_position_ids, device=self.device)
-            bigdl_attention_mask = torch.tensor(bigdl_attention_mask, device=self.device)
+            bigdl_attention_mask = torch.tensor(
+                bigdl_attention_mask, device=self.device
+            )
             kwargs = {
                 "input_ids": bigdl_input_ids,
                 "position_ids": bigdl_position_ids,
@@ -181,7 +203,7 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
                 # "return_dict": True,
             }
         # pdb.set_trace()
-        if self.device.type == 'xpu':
+        if self.device.type == "xpu":
             torch.xpu.empty_cache()
         st_timestamp = time.perf_counter()
         outputs = self.model.forward(**kwargs)
@@ -197,22 +219,18 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
         # tmp = torch.xpu.memory_stats()
         # logger.info(f"before: {tmp['allocated_bytes.all.current']}")
 
-        self.update_kv_cache(cur_seq_ids,
-                             kv_cache, kv_cache_size_0, kv_cache_size_1)
+        self.update_kv_cache(cur_seq_ids, kv_cache, kv_cache_size_0, kv_cache_size_1)
 
         # tmp = torch.xpu.memory_stats()
         # logger.info(f"after: {tmp['allocated_bytes.all.current']}")
         return bigdl_output
 
-
-
-    def forward_new(
+    def forward(
         self,
         seq_group_meta_data_lists: List[SequenceGroupMetadata],
         kv_cache: Optional = None,
         input_metadata: Optional = None,
     ) -> Tuple[torch.Tensor, List[Tuple[torch.Tensor, torch.Tensor]]]:
-
         # We should arrange inputs that will be passed to the bigdl-llm models
         # Specifically, we should arrange input_ids, position_ids, attention_mask
         # So, here it is:
@@ -227,7 +245,7 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
         # 1. Assemble bigdl_input_ids
         for seq_group_meta_data in seq_group_meta_data_lists:
             # seq_group contains multiple sequences, we only process the first unfinished one
-            processed_seq_id = seq_group_meta_data.seq_data.keys()[0]
+            processed_seq_id = list(seq_group_meta_data.seq_data.keys())[0]
             processed_seq_data = seq_group_meta_data.seq_data[processed_seq_id]
             # We need to process differently for prefill/decoding
             if is_prefill_stage:
@@ -239,11 +257,14 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
 
         # For prompt we need to do padding so that they have the same length
         # TODO(gc): implement selective_batching for prefill
+        # TODO(gc): check whether the logic is correct when there is only one prompt
         if is_prefill_stage:
             # padding bigdl_input_ids to max_prompt_len
             max_prompt_len = len(max(bigdl_input_ids, key=len))
             # attention_mask need to be calculated before padding
-            bigdl_attention_mask = _get_attention_mask_for_prompts(bigdl_input_ids, max_prompt_len)
+            bigdl_attention_mask = _get_attention_mask_for_prompts(
+                bigdl_input_ids, max_prompt_len
+            )
             bigdl_input_ids = _padding_prompt_to_max(bigdl_input_ids, max_prompt_len, 0)
         # 1. Assemble bigdl_input_ids end
 
@@ -252,10 +273,11 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
 
         # 2. Assemble kv_cache end
 
-
         # 3. Invoke underlying models
         if is_prefill_stage:
+            self.debug_print("###### In prefill stage")
             bigdl_input_ids = torch.tensor(bigdl_input_ids, device=self.device)
+            bigdl_attention_mask = torch.tensor(bigdl_attention_mask, device=self.device)
             kwargs = {
                 "input_ids": bigdl_input_ids,
                 "attention_mask": bigdl_attention_mask,
@@ -267,16 +289,18 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
             pass
         # 3. Invoke underlying models end
 
-
         # 4. Update kv_cache
-
 
         # 4. Update kv_cache ends
 
-
         # 5. applying sampler
+        # Find the last token for each batch
+        # Size (B, seq_len, embedding_len)
+        logits = outputs.logits[:, -1, :]
 
+        # TODO(gc): fix sampler, remove timestamp
+        bigdl_output = self.sampler(logits, input_metadata, time.perf_counter())
         # 5. applying sampler ends
 
         # 6. return result to invoker
-        return
+        return bigdl_output
