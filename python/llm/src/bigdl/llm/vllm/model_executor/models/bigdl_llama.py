@@ -286,17 +286,17 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
 
         # KV_CACHE should in the format (batch, num_heads, seq_len, embed_size_per_head)
         # Our maintained kv_cache in the format (num_heads, seq_len, embed_size_per_head)
-        # However, differnet sequences may have different seq_len-> in different stage
-        # We need to create a new kv_cache for handling:
+        # However, different sequences may have different seq_len-> in different stage
+        # We need to create a new kv_cache:
         # a. iterate through the processed_seq_ids
         # b. for each of the processed_seq_id, get its kv_cache from the kv_cache, find the max_seq_len of those kv_cache
         # We only need to consider one layer and one key?
         # TODO(gc): This is correct if every layer has the same kv_cache shape, and key/value has the same kv_cache shape
         bigdl_kv_cache_list = [[] for _ in range(num_layers)]
         if not is_prefill_stage:
-            max_kv_len = 0
-            for processed_seq_id in processed_seq_ids:
-                max_kv_len = max(max_kv_len, kv_cache[0][0][processed_seq_id].size(dim=1))
+            max_kv_len = max(kv_cache[0][0][processed_seq_id].size(dim=1) for processed_seq_id in processed_seq_ids)
+            # for processed_seq_id in processed_seq_ids:
+            #     max_kv_len = max(max_kv_len, kv_cache[0][0][processed_seq_id].size(dim=1))
             # c. for each of the processed_seq_id, padding it to the max_seq_len, and concat
             for layer in range(num_layers):
                 # Assemble KV_CACHE for this layer
