@@ -127,6 +127,7 @@ class LLMEngine:
         # self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
         self.log_stats = log_stats
+        # TODO(gc): [[Dict, Dict] x 2 x 32], we may want to extend the first layers?
         self.kv_cache = [[dict() for _ in range(2)] for _ in range(32)]
         # self._verify_args()
 

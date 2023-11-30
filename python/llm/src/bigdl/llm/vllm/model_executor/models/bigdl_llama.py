@@ -24,6 +24,7 @@ from bigdl.llm.vllm.sequence import SequenceOutputs, SequenceGroupMetadata
 from bigdl.llm.vllm.model_executor.layers.bigdl_sampler import BigDLSampler
 from bigdl.llm.vllm.model_executor.models.bigdl_model import BigDLModelForCausalLM
 from bigdl.llm.vllm.logger import init_logger
+from bigdl.llm.vllm.model_executor.input_metadata import InputMetadata
 import math
 import time
 from transformers.generation.logits_process import (
@@ -121,8 +122,8 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
     def forward_old(
         self,
         seq_group_meta_data_lists: List[SequenceGroupMetadata],
-        kv_cache: Optional = None,
-        input_metadata: Optional = None,
+        kv_cache: Optional[List[List[Dict]]] = None,
+        input_metadata: Optional[InputMetadata] = None,
     ) -> Tuple[torch.Tensor, List[Tuple[torch.Tensor, torch.Tensor]]]:
         kv_cache_size_0 = self.model.config.num_hidden_layers
         kv_cache_size_1 = 2
@@ -228,8 +229,9 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
     def forward(
         self,
         seq_group_meta_data_lists: List[SequenceGroupMetadata],
-        kv_cache: Optional = None,
-        input_metadata: Optional = None,
+        # kv_cache in the format [[dict() for _ in range(2)] for _ in range(32)]
+        kv_cache: Optional[List[List[Dict]]] = None,
+        input_metadata: Optional[InputMetadata] = None,
     ) -> Tuple[torch.Tensor, List[Tuple[torch.Tensor, torch.Tensor]]]:
         # We should arrange inputs that will be passed to the bigdl-llm models
         # Specifically, we should arrange input_ids, position_ids, attention_mask
@@ -238,6 +240,10 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
         bigdl_position_ids = []
         # TODO(gc): consider delete this?
         bigdl_attention_mask = []
+        processed_seq_ids = []
+
+        # some parameters of model
+        num_layers = self.model.config.num_hidden_layers
 
         # 0. Verify is_prompt or is_decoding
         is_prefill_stage = seq_group_meta_data_lists[0].is_prompt
@@ -246,19 +252,25 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
         for seq_group_meta_data in seq_group_meta_data_lists:
             # seq_group contains multiple sequences, we only process the first unfinished one
             processed_seq_id = list(seq_group_meta_data.seq_data.keys())[0]
+            processed_seq_ids.append(processed_seq_id)
             processed_seq_data = seq_group_meta_data.seq_data[processed_seq_id]
             # We need to process differently for prefill/decoding
             if is_prefill_stage:
                 # For prefill, all tokens are needed
                 bigdl_input_ids.append(processed_seq_data.get_token_ids())
+                self.debug_print("added one prompt to process...")
             else:
                 # For decoding, only the last token is needed
                 bigdl_input_ids.append(processed_seq_data.get_last_token_id())
 
+        self.debug_print("loop ends...")
+
         # For prompt we need to do padding so that they have the same length
         # TODO(gc): implement selective_batching for prefill
-        # TODO(gc): check whether the logic is correct when there is only one prompt
-        if is_prefill_stage:
+        # TODO(gc): test this logic with more than one prompt in parallel with variable length
+        self.debug_print("#### Length of bigdl_input_ids:", len(bigdl_input_ids))
+        if is_prefill_stage and len(bigdl_input_ids) > 1:
+            self.debug_print("#### Doing padding")
             # padding bigdl_input_ids to max_prompt_len
             max_prompt_len = len(max(bigdl_input_ids, key=len))
             # attention_mask need to be calculated before padding
@@ -270,6 +282,12 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
 
         # 2. Assemble kv_cache for decoding stage?
         # TODO(gc): we may need to set bigdl_attention_mask correctly for decoding stage
+        # TODO(gc): we need to pay attention to its devices.  Otherwise we may waste xpu memory
+        # We need to extract KV_CACHE from our maintained kv_cache, and assemble it.
+
+        # KV_CACHE should in the format (batch, num_heads, seq_len, embed_size_per_head)
+
+        # Our maintained kv_cache in the format (num_heads, seq_len, embed_size_per_head)
 
         # 2. Assemble kv_cache end
 
@@ -277,10 +295,11 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
         if is_prefill_stage:
             self.debug_print("###### In prefill stage")
             bigdl_input_ids = torch.tensor(bigdl_input_ids, device=self.device)
-            bigdl_attention_mask = torch.tensor(bigdl_attention_mask, device=self.device)
             kwargs = {
                 "input_ids": bigdl_input_ids,
-                "attention_mask": bigdl_attention_mask,
+                "attention_mask": None
+                if len(bigdl_attention_mask) == 0
+                else torch.tensor(bigdl_attention_mask, device=self.device),
                 "past_key_values": None,
                 "use_cache": True,
             }
@@ -290,7 +309,24 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
         # 3. Invoke underlying models end
 
         # 4. Update kv_cache
+        last_kv_cache = outputs.past_key_values
+        # As described in documentations: here is the format of the past_key_values
+        # (tuple(tuple(torch.FloatTensor))
+        # The length is config.n_layers.  The embedded tensor shape:
+        # ((batch_size, num_heads, sequence_length, embed_size_per_head)x2)
+        # We need to maintain the KV_CACHE for each of the sequence
 
+        # Our maintained KV_CACHE format:
+        # KV_CACHE first dimension num_layers
+        # KV_CACHE second dimension 2, one for key, one for values
+        # KV_CACHE third layer, a dict seq_id -> torch.Tensor
+        for layer in num_layers:
+            for kv in 2:
+                batch_dim = 0
+                for seq_id in processed_seq_ids:
+                    self.debug("past_key_values's shape: ", last_kv_cache[layer][kv].shape)
+                    kv_cache[layer][kv][seq_id] = last_kv_cache[layer][kv][batch_dim]
+                    batch_dim += 1
         # 4. Update kv_cache ends
 
         # 5. applying sampler

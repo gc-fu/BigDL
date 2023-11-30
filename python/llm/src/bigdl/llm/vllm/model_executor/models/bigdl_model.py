@@ -138,7 +138,9 @@ class BigDLModelForCausalLM(nn.Module):
         kv_cache_size_0: int,
         kv_cache_size_1: int,
     ) -> None:
+        # num_layers
         for i in range(kv_cache_size_0):
+            # 2
             for j in range(kv_cache_size_1):
                 index = 0
                 for seq_id in cur_seq_ids:
