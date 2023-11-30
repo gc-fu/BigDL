@@ -235,11 +235,9 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
         input_metadata: Optional[InputMetadata] = None,
     ) -> Tuple[torch.Tensor, List[Tuple[torch.Tensor, torch.Tensor]]]:
         # We should arrange inputs that will be passed to the bigdl-llm models
-        # Specifically, we should arrange input_ids, position_ids, attention_mask
+        # Specifically, we should arrange input_ids, position_ids(Optional), attention_mask(for prefill)
         # So, here it is:
         bigdl_input_ids = []
-        bigdl_position_ids = []
-        # TODO(gc): consider delete this?
         bigdl_attention_mask = []
         processed_seq_ids = []
 
