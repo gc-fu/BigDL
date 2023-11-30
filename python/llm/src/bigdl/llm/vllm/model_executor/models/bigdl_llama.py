@@ -306,16 +306,15 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
                     for processed_seq_id in processed_seq_ids:
                         # Get its current kv_cache
                         processed_kv_cache = kv_cache[layer][kv][processed_seq_id]
-                        # Added one more dimension to it
-                        processed_kv_cache = processed_kv_cache.view([1] + list(processed_kv_cache.shape))
-                        del kv_cache[layer][kv][processed_seq_id]
-                        # Padding the tensor to max_length
-                        if processed_kv_cache.size(dim=2) < max_kv_len:
-                            pads = (0, 0, 0, max_kv_len - processed_kv_cache.size(dim=2), 0, 0, 0, 0)
+                        # Set None so that the memory will be released later
+                        kv_cache[layer][kv][processed_seq_id] = None
+                        if processed_kv_cache.size(dim=1) < max_kv_len:
+                            pads = (0, 0, 0, max_kv_len - processed_kv_cache.size(dim=1), 0, 0)
                             processed_kv_cache = F.pad(processed_kv_cache, pads)
                         self.debug_print("padded kv_cache_size:", processed_kv_cache.shape)
                         kv_list.append(processed_kv_cache)
-                    current_layer_kv_cache = torch.cat(kv_list, dim=0)
+                    current_layer_kv_cache = torch.stack(kv_list, dim=0)
+                    kv_list.clear()
                     bigdl_kv_cache_list[layer].append(current_layer_kv_cache)
             # TODO(gc): for those paddings, how could we ensure it is correct?
             # TODO(gc): Is it even meaningful to padding in kv_cache
