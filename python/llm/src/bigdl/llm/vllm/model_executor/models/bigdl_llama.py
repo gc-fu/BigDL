@@ -67,7 +67,7 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
         config: LlamaConfig,
         device: Optional[str] = None,
         max_model_len: Optional[int] = None,
-        debug=True,
+        debug=False,
     ):
         super().__init__(config, device, max_model_len)
         self.config = config
@@ -308,14 +308,13 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
                         processed_kv_cache = kv_cache[layer][kv][processed_seq_id]
                         # Added one more dimension to it
                         processed_kv_cache = processed_kv_cache.view([1] + list(processed_kv_cache.shape))
+                        del kv_cache[layer][kv][processed_seq_id]
                         # Padding the tensor to max_length
                         if processed_kv_cache.size(dim=2) < max_kv_len:
                             pads = (0, 0, 0, max_kv_len - processed_kv_cache.size(dim=2), 0, 0, 0, 0)
                             processed_kv_cache = F.pad(processed_kv_cache, pads)
                         self.debug_print("padded kv_cache_size:", processed_kv_cache.shape)
                         kv_list.append(processed_kv_cache)
-                    # key_cache = torch.cat(key_list, dim=0)
-                    # value_cache = torch.cat(value_list, dim=0)
                     current_layer_kv_cache = torch.cat(kv_list, dim=0)
                     bigdl_kv_cache_list[layer].append(current_layer_kv_cache)
             # TODO(gc): for those paddings, how could we ensure it is correct?
@@ -341,6 +340,8 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
                 "past_key_values": bigdl_kv_cache_list,
                 "use_cache": True,
             }
+        if self.device.type == "xpu":
+            torch.xpu.empty_cache()
         outputs = self.model.forward(**kwargs)
         # 3. Invoke underlying models end
 
@@ -356,6 +357,7 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
         # KV_CACHE first dimension num_layers
         # KV_CACHE second dimension 2, one for key, one for values
         # KV_CACHE third layer, a dict seq_id -> torch.Tensor
+        # TODO(gc): we may want to move tensors to CPU to save memory?
         for layer in range(num_layers):
             for kv in range(2):
                 batch_dim = 0
