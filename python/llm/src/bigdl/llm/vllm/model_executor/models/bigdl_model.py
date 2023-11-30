@@ -21,6 +21,7 @@ from transformers import LlamaConfig
 
 from bigdl.llm.vllm.sequence import SequenceOutputs, SequenceGroupMetadata
 from bigdl.llm.transformers.models.utils import extend_kv_cache
+from bigdl.llm.vllm.model_executor.input_metadata import InputMetadata
 
 zero_cache_dict = {}
 
@@ -150,8 +151,8 @@ class BigDLModelForCausalLM(nn.Module):
     def forward(
         self,
         seq_group_meta_data_lists: List[SequenceGroupMetadata],
-        kv_cache: Optional = None,
-        input_metadata: Optional = None,
+        kv_cache: Optional[List[List[Dict]]] = None,
+        input_metadata: Optional[InputMetadata] = None,
     ) -> Tuple[torch.Tensor, List[Tuple[torch.Tensor, torch.Tensor]]]:
         pass
 

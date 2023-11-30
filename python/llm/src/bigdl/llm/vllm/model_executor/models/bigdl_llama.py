@@ -34,6 +34,7 @@ from transformers.generation.logits_process import (
     TopKLogitsWarper,
     TopPLogitsWarper,
 )
+import torch.nn.functional as F
 
 
 logger = init_logger(__name__)
@@ -261,7 +262,7 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
                 self.debug_print("added one prompt to process...")
             else:
                 # For decoding, only the last token is needed
-                bigdl_input_ids.append(processed_seq_data.get_last_token_id())
+                bigdl_input_ids.append([processed_seq_data.get_last_token_id()])
 
         self.debug_print("loop ends...")
 
@@ -286,15 +287,47 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
         # We need to extract KV_CACHE from our maintained kv_cache, and assemble it.
 
         # KV_CACHE should in the format (batch, num_heads, seq_len, embed_size_per_head)
-
         # Our maintained kv_cache in the format (num_heads, seq_len, embed_size_per_head)
-
+        # However, differnet sequences may have different seq_len-> in different stage
+        # We need to create a new kv_cache for handling:
+        # a. iterate through the processed_seq_ids
+        # b. for each of the processed_seq_id, get its kv_cache from the kv_cache, find the max_seq_len of those kv_cache
+        # We only need to consider one layer and one key?
+        # TODO(gc): This is correct if every layer has the same kv_cache shape, and key/value has the same kv_cache shape
+        bigdl_kv_cache_list = [[] for _ in range(num_layers)]
+        if not is_prefill_stage:
+            max_kv_len = 0
+            for processed_seq_id in processed_seq_ids:
+                max_kv_len = max(max_kv_len, kv_cache[0][0][processed_seq_id].size(dim=1))
+            # c. for each of the processed_seq_id, padding it to the max_seq_len, and concat
+            for layer in range(num_layers):
+                # Assemble KV_CACHE for this layer
+                for kv in range(2):
+                    # Assemble key_cache or value_cache
+                    kv_list = []
+                    for processed_seq_id in processed_seq_ids:
+                        # Get its current kv_cache
+                        processed_kv_cache = kv_cache[layer][kv][processed_seq_id]
+                        # Added one more dimension to it
+                        processed_kv_cache = processed_kv_cache.view([1] + list(processed_kv_cache.shape))
+                        # Padding the tensor to max_length
+                        if processed_kv_cache.size(dim=2) < max_kv_len:
+                            pads = (0, 0, 0, max_kv_len - processed_kv_cache.size(dim=2), 0, 0, 0, 0)
+                            processed_kv_cache = F.pad(processed_kv_cache, pads)
+                        self.debug_print("padded kv_cache_size:", processed_kv_cache.shape)
+                        kv_list.append(processed_kv_cache)
+                    # key_cache = torch.cat(key_list, dim=0)
+                    # value_cache = torch.cat(value_list, dim=0)
+                    current_layer_kv_cache = torch.cat(kv_list, dim=0)
+                    bigdl_kv_cache_list[layer].append(current_layer_kv_cache)
+            # TODO(gc): for those paddings, how could we ensure it is correct?
+            # TODO(gc): Is it even meaningful to padding in kv_cache
         # 2. Assemble kv_cache end
 
         # 3. Invoke underlying models
+        bigdl_input_ids = torch.tensor(bigdl_input_ids, device=self.device)
         if is_prefill_stage:
             self.debug_print("###### In prefill stage")
-            bigdl_input_ids = torch.tensor(bigdl_input_ids, device=self.device)
             kwargs = {
                 "input_ids": bigdl_input_ids,
                 "attention_mask": None
@@ -303,9 +336,14 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
                 "past_key_values": None,
                 "use_cache": True,
             }
-            outputs = self.model.forward(**kwargs)
         else:
-            pass
+            self.debug_print("###### In decoding stage")
+            kwargs = {
+                "input_ids": bigdl_input_ids,
+                "past_key_values": bigdl_kv_cache_list,
+                "use_cache": True,
+            }
+        outputs = self.model.forward(**kwargs)
         # 3. Invoke underlying models end
 
         # 4. Update kv_cache
@@ -320,11 +358,11 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
         # KV_CACHE first dimension num_layers
         # KV_CACHE second dimension 2, one for key, one for values
         # KV_CACHE third layer, a dict seq_id -> torch.Tensor
-        for layer in num_layers:
-            for kv in 2:
+        for layer in range(num_layers):
+            for kv in range(2):
                 batch_dim = 0
                 for seq_id in processed_seq_ids:
-                    self.debug("past_key_values's shape: ", last_kv_cache[layer][kv].shape)
+                    # self.debug_print("past_key_values's shape: ", last_kv_cache[layer][kv].shape)
                     kv_cache[layer][kv][seq_id] = last_kv_cache[layer][kv][batch_dim]
                     batch_dim += 1
         # 4. Update kv_cache ends
