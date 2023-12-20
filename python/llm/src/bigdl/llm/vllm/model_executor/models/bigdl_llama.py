@@ -173,11 +173,13 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
             bigdl_kv_cache = self.prepare_kv_cache_llama(cur_seq_ids,
                                                          kv_cache, num_layers)
         else:
-            bigdl_attention_mask = _get_attention_mask_for_prompts(bigdl_input_ids, max_prompt_len)
-            bigdl_input_ids = [
-                _pad_to_max(input_ids, max_prompt_len, self.pad_token_id)
-                for input_ids in bigdl_input_ids
-            ]
+            pass
+            # We no longer need attention_mask for bigdl_input_ids
+            # bigdl_attention_mask = _get_attention_mask_for_prompts(bigdl_input_ids, max_prompt_len)
+            # bigdl_input_ids = [
+            #     _pad_to_max(input_ids, max_prompt_len, self.pad_token_id)
+            #     for input_ids in bigdl_input_ids
+            # ]
 
         # TODO: this could be deleted after prefill stage is also selective_batched
         decoding_attention_mask_list = []
@@ -199,7 +201,8 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
                 decoding_attention_mask_list.append(cur_attention_mask)
 
 
-        bigdl_input_ids = torch.tensor(bigdl_input_ids, device=self.device)
+        # bigdl_input_ids = torch.tensor(bigdl_input_ids, device=self.device)
+        bigdl_input_ids = [torch.tensor(x, device=self.device).unsqueeze(0) for x in bigdl_input_ids]
 
         # TODO: prefill requests could also be sbed, so that we can remove attention_mask forever
         if is_decoding_stage:
@@ -216,6 +219,7 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
             }
         else:
             # Prefill stage
+            # TODO: delete
             attention_mask = torch.tensor(bigdl_attention_mask, device=self.device)
             position_ids = attention_mask.long().cumsum(-1) - 1
             position_ids.masked_fill_(attention_mask == 0, 1)
