@@ -176,8 +176,8 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
                     cur_pos = seq_data.get_len()
                     decoding_position_ids.append(cur_pos - 1)
                     # Total length: current_seq_len + 1
-                    cur_attention_mask = [0] * (current_seq_len - cur_pos + 1) + [1] * (cur_pos)
-                    decoding_attention_mask_list.append(cur_attention_mask)
+                    # cur_attention_mask = [0] * (current_seq_len - cur_pos + 1) + [1] * (cur_pos)
+                    # decoding_attention_mask_list.append(cur_attention_mask)
             else:
                 cur_seq_len = bigdl_kv_cache[0][0].size(2)
                 for seq_group_meta_data in seq_group_meta_data_lists:
@@ -194,8 +194,8 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
 
         if is_decoding_stage:
             if enable_vllm_se_batching:
-                attention_mask = [torch.tensor(x, device=self.device).unsqueeze(0)
-                                  for x in decoding_attention_mask_list]
+                # attention_mask = [torch.tensor(x, device=self.device).unsqueeze(0)
+                #                   for x in decoding_attention_mask_list]
                 position_ids = torch.tensor(decoding_position_ids, device=self.device).long()
                 position_ids = position_ids.unsqueeze(-1)
             else:
@@ -204,7 +204,7 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
             kwargs = {
                 "input_ids": bigdl_input_ids,
                 "position_ids": position_ids,
-                "attention_mask": attention_mask,
+                "attention_mask": None,
                 "past_key_values": bigdl_kv_cache,
                 "use_cache": True,
                 # "return_dict": True,
@@ -218,6 +218,7 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
                 position_ids.to(self.device)
             else:
                 position_ids = None
+            # print(position_ids)
             kwargs = {
                 "input_ids": bigdl_input_ids,
                 "attention_mask": attention_mask,

@@ -443,7 +443,8 @@ def llama_attention_selective_batching_forward_4_31(
                 attn_output, attn_weights = native_sdp(current_query_states,
                                                        current_key_states,
                                                        current_value_states,
-                                                       attention_mask[batch],
+                                                       #attention_mask[batch],
+                                                       None,
                                                        1,
                                                        1,
                                                        current_kv_len,
@@ -483,7 +484,7 @@ def llama_attention_selective_batching_forward_4_31(
     # Can also happens for decoding fast path
     if isinstance(attention_mask, list):
         # For decoding fast path
-        attention_mask = attention_mask[0]
+        attention_mask = None
     attn_output, attn_weights = native_sdp(query_states,
                                            key_states,
                                            value_states,
@@ -621,7 +622,7 @@ def llama_model_selective_batching_forward_4_31(
     # TODO: validate correctness
     device = input_ids.device if input_ids is not None else inputs_embeds.device
     if position_ids is None:
-        invalidInputError("vLLM: position_ids should never be None")
+        invalidInputError(False, "vLLM: position_ids should never be None")
     else:
         # print(f"Original position_ids is {position_ids}")
         position_ids = position_ids.view(-1, seq_length)
@@ -658,22 +659,22 @@ def llama_model_selective_batching_forward_4_31(
     if inputs_embeds is None:
         inputs_embeds = self.embed_tokens(input_ids)
     # embed positions
-    if attention_mask is None:
-        invalidInputError(False, "attention_mask should never be None")
+    # if attention_mask is None:
+    #     invalidInputError(False, "attention_mask should never be None")
     # print(f"attention_mask before expanding: {attention_mask}")
     if past_key_values is None:
         attention_mask = self._prepare_decoder_attention_mask(
             attention_mask, (batch_size, seq_length), inputs_embeds, past_key_values_length
         )
-    else:
-        i = 0
-        for attn_mask in attention_mask:
-            past_key_value_length = past_key_values[0][i][0].shape[2]
-            new_mask = self._prepare_decoder_attention_mask(
-                attn_mask, (1, seq_length), inputs_embeds, past_key_value_length
-            )
-            attention_mask[i] = new_mask
-            i += 1
+    # else:
+    #     i = 0
+    #     for attn_mask in attention_mask:
+    #         past_key_value_length = past_key_values[0][i][0].shape[2]
+    #         new_mask = self._prepare_decoder_attention_mask(
+    #             attn_mask, (1, seq_length), inputs_embeds, past_key_value_length
+    #         )
+    #         attention_mask[i] = new_mask
+    #         i += 1
 
     hidden_states = inputs_embeds
 
