@@ -198,6 +198,7 @@ class BigDLModelForCausalLM(nn.Module):
         seq_group_meta_data_lists: List[SequenceGroupMetadata],
         kv_cache: Optional = None,
         input_metadata: Optional = None,
+        sampling_metadata: Optional = None,
     ) -> Tuple[torch.Tensor, List[Tuple[torch.Tensor, torch.Tensor]]]:
         pass
 

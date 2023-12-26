@@ -114,6 +114,7 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
         # kv_cache in the format [[dict() for _ in range(2)] for _ in range(32)]
         kv_cache: Optional[List[List[Dict]]] = None,
         input_metadata: Optional[InputMetadata] = None,
+        sampling_metadata: Optional = None,
     ) -> Tuple[torch.Tensor, List[Tuple[torch.Tensor, torch.Tensor]]]:
         num_layers = self.model.config.num_hidden_layers
         # One for key, one for value
@@ -244,7 +245,7 @@ class BigDLLlamaForCausalLM(BigDLModelForCausalLM):
         # pdb.set_trace()
 
         logits = outputs.logits[:, -1, :]
-        bigdl_output = self.sampler(logits, input_metadata, st_timestamp)
+        bigdl_output = self.sampler(logits, sampling_metadata, st_timestamp)
         # tmp = torch.xpu.memory_stats()
         # logger.info(f"before: {tmp['allocated_bytes.all.current']}")
 

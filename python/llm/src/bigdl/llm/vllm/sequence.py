@@ -38,6 +38,8 @@ from typing import Dict, List, Optional, Union
 from bigdl.llm.vllm.sampling_params import SamplingParams
 from bigdl.llm.utils.common import invalidInputError
 
+PromptLogprobs = List[Optional[Dict[int, float]]]
+
 
 class SequenceStatus(enum.Enum):
     """Status of a sequence."""
@@ -383,6 +385,61 @@ class SequenceOutputs:
                 and self.logprobs == other.logprobs)
 
 
+class SequenceOutput:
+    """The model output associated with a sequence.
+
+    Args:
+        parent_seq_id: The ID of the parent sequence (for forking in beam
+            search).
+        output_token: The output token ID.
+        logprobs: The logprobs of the output token.
+            (Token id -> logP(x_i+1 | x_0, ..., x_i))
+    """
+
+    def __init__(
+        self,
+        parent_seq_id: int,
+        output_token: int,
+        logprobs: Dict[int, float],
+    ) -> None:
+        self.parent_seq_id = parent_seq_id
+        self.output_token = output_token
+        self.logprobs = logprobs
+
+    def __repr__(self) -> str:
+        return (f"SequenceOutput(parent_seq_id={self.parent_seq_id}, "
+                f"output_token={self.output_token}, "
+                f"logprobs={self.logprobs})")
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, SequenceOutput):
+            raise NotImplementedError()  # noqa
+        return (self.parent_seq_id == other.parent_seq_id
+                and self.output_token == other.output_token
+                and self.logprobs == other.logprobs)
+
+
+class SequenceGroupOutput:
+    """The model output associated with a sequence group."""
+
+    def __init__(
+        self,
+        samples: List[SequenceOutput],
+        prompt_logprobs: Optional[PromptLogprobs],
+    ) -> None:
+        self.samples = samples
+        self.prompt_logprobs = prompt_logprobs
+
+    def __repr__(self) -> str:
+        return (f"SequenceGroupOutput(samples={self.samples}, "
+                f"prompt_logprobs={self.prompt_logprobs})")
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, SequenceGroupOutput):
+            raise NotImplementedError()  # noqa
+        return (self.samples == other.samples
+                and self.prompt_logprobs == other.prompt_logprobs)
+
 # For each sequence group, we generate a list of SequenceOutputs object,
 # each of which contains one possible candidate for the next token.
-SamplerOutput = List[List[SequenceOutputs]]
+SamplerOutput = List[SequenceGroupOutput]

@@ -622,7 +622,7 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
             logprobs = create_logprobs(output.token_ids, output.logprobs)
         else:
             logprobs = None
-        if output.output_token_latency is None:
+        if True or output.output_token_latency is None:
             choice_data = CompletionResponseChoice(
                 index=output.index,
                 text=output.text,

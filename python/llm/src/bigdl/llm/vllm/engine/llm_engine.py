@@ -127,7 +127,7 @@ class LLMEngine:
         # self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
         self.log_stats = log_stats
-        self.kv_cache = [[dict() for _ in range(2)] for _ in range(model_config.hf_config.num_hidden_layers)]
+        self.kv_cache = [[dict(), dict()] for _ in range(model_config.hf_config.num_hidden_layers)]
         # self._verify_args()
 
         self.tokenizer = get_tokenizer(
@@ -359,7 +359,7 @@ class LLMEngine:
                 child.append_token_id(
                     child_sample.output_token,
                     child_sample.logprobs,
-                    child_sample.latency,
+                    # child_sample.latency,
                 )
                 child_seqs.append((child, parent))
             # Continue the parent sequence for the last child sample.
@@ -369,7 +369,7 @@ class LLMEngine:
             parent.append_token_id(
                 last_child_sample.output_token,
                 last_child_sample.logprobs,
-                last_child_sample.latency,
+                # last_child_sample.latency,
             )
             child_seqs.append((parent, parent))
 
@@ -519,7 +519,7 @@ class LLMEngine:
         # Update the scheduled sequence groups with the model outputs.
         scheduled_seq_groups = scheduler_outputs.scheduled_seq_groups
         for seq_group, samples in zip(scheduled_seq_groups, output):
-            self._process_sequence_group_samples(seq_group, samples)
+            self._process_sequence_group_samples(seq_group, samples.samples)
 
         # Free the finished sequence groups.
         self.scheduler.free_finished_seq_groups()
@@ -547,11 +547,14 @@ class LLMEngine:
         and updates the scheduler with the model outputs. Finally, it decodes
         the sequences and returns the newly generated results.
         """
+        import pdb
+        # pdb.set_trace()
         seq_group_metadata_list, scheduler_outputs, ignored = self._schedule()
         if scheduler_outputs.is_empty():
             return ignored
 
         # Execute the model.
+
         output = self._run_workers(
             "execute_model",
             seq_group_metadata_list=seq_group_metadata_list,
