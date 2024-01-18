@@ -414,9 +414,15 @@ def llama_attention_selective_batching_forward_4_31(
         if past_key_value is not None:
             batched_attention_output = []
             # print(f"type of attention_mask is {type(attention_mask)}")
+            q_tensors = []
+            k_tensors = []
+            v_tensors = []
             for batch in range(bsz):
                 enough_kv_room = is_enough_kv_cache_room_4_31(past_key_value[batch])
+                # We are keeping past_key_value for the current batch in the past_key_value
                 past_k, past_v = past_key_value[batch]
+                # TODO: Can we can safely set past_key_value[batch] to NULL
+                # past_key_value[batch] = None
                 current_kv_len = past_k.shape[-2] + 1
                 if not enough_kv_room:
                     # allocate new
@@ -439,12 +445,22 @@ def llama_attention_selective_batching_forward_4_31(
                                                                            past_v,
                                                                            current_key_states,
                                                                            current_value_states)
+                # TODO: We can safely delete something from key_states, value_states correct?
                 updated_past_key_values.append((current_key_states, current_value_states))
 
                 current_key_states = repeat_kv(current_key_states, self.num_key_value_groups)
                 current_value_states = repeat_kv(current_value_states, self.num_key_value_groups)
-
                 current_query_states = query_states[batch: batch + 1, :, :, :]
+
+                q_tensors.append(current_query_states)
+                k_tensors.append(current_key_states)
+                v_tensors.append(current_value_states)
+
+                # These three arguments + attention_mask list will be arguments for invoking
+                # selective batching kernel
+
+
+                # We then add this to a new list
                 attn_output, attn_weights = native_sdp(current_query_states,
                                                        current_key_states,
                                                        current_value_states,
